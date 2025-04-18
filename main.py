@@ -2,6 +2,10 @@ import requests as http
 import urllib
 from mastodon import Mastodon
 from datetime import datetime
+from ratelimit import limits, RateLimitException
+from backoff import on_exception, expo
+
+FIVE_MINUTES = 300
 
 
 def create_app(source_instances):
@@ -27,6 +31,30 @@ def login(source_instances):
         )
 
 
+def get_all_replies(status, mastodon):
+    replies = []
+    while status and "in_reply_to_id" in status and status["in_reply_to_id"]:
+        print("Got reply")
+        status = get_status(status["in_reply_to_id"], mastodon)
+        if status and "in_reply_to_id" in status:
+            replies.append(create_status(status, get_media_attachment_ids(status)))
+        else:
+            break
+    return replies
+
+
+@on_exception(expo, RateLimitException, max_tries=10)
+@limits(calls=300, period=FIVE_MINUTES)
+def get_status(id, mastodon):
+    mastodon.status(id)
+
+
+@on_exception(expo, RateLimitException, max_tries=10)
+@limits(calls=300, period=FIVE_MINUTES)
+def get_account_statuses(account, mastodon):
+    return mastodon.account_statuses(account)
+
+
 def get_user_statuses_from_remotes(accounts, source_instances, target_instance):
     accounts_statuses = []
     for source_instance in source_instances:
@@ -34,7 +62,10 @@ def get_user_statuses_from_remotes(accounts, source_instances, target_instance):
         for account in accounts:
             print(f"Searching for posts for {account}@{source_instance}")
             account = mastodon.account_lookup(f"@{account}@{target_instance}")
-            statuses = mastodon.account_statuses(account)
+            statuses = get_account_statuses(account, mastodon)
+            for status in statuses:
+                statuses.append(get_all_replies(status, mastodon))
+
             accounts_statuses.append(statuses)
     return accounts_statuses
 
@@ -95,9 +126,6 @@ def generate_statuses_sql(accounts_statuses):
     )
     for account_statuses in accounts_statuses:
         for status in account_statuses:
-            # if status["in_reply_to_id"]:
-            #     reply = mastodon.status(status["in_reply_to_id"])
-            #     commands.append(create_status(reply, get_media_attachment_ids(reply)))
             media_attachment_ids = get_media_attachment_ids(status)
             commands.append(create_status(status, media_attachment_ids))
 
@@ -117,6 +145,21 @@ def get_visibility(visibility_str):
     return mapping[visibility_str]
 
 
+def cleanup_statuses(statuses):
+    result = statuses.copy()
+    for status in statuses:
+        if not status:
+            result.remove(status)
+            continue
+        id_exists = False
+        for reference in statuses:
+            if reference and reference["id"] == status["in_reply_to_id"]:
+                id_exists = True
+        if not id_exists:
+            result.remove(status)
+    return result
+
+
 def main():
     accounts = ["hhwerbefrei"]
     target_instance = "bewegung.social"
@@ -127,6 +170,7 @@ def main():
     statuses = get_user_statuses_from_remotes(
         accounts, source_instances, target_instance
     )
+    statuses = cleanup_statuses(statuses)
     commands = generate_statuses_sql(statuses)
     write_commands(commands)
 
