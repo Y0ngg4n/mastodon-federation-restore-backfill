@@ -39,6 +39,55 @@ def get_user_statuses_from_remotes(accounts, source_instances, target_instance):
     return accounts_statuses
 
 
+def create_status(status, media_attachment_ids):
+
+    return "EXECUTE backfill_statuses ({}, '{}', '{}', {}, {}, {}, {}, '{}', {}, {}, '{}', {}, '{}', {}, {}, {}, {}, {}, {}, {}, {},{});\n".format(
+        status["id"],
+        status["uri"].replace("'", r"\'"),
+        status["content"].replace("'", r"\'"),
+        int(datetime.timestamp(status["created_at"])),
+        (
+            int(datetime.timestamp(status["edited_at"]))
+            if status["edited_at"]
+            else datetime.timestamp(status["created_at"])
+        ),
+        (status["in_reply_to_id"] if status["in_reply_to_id"] else "null"),
+        (status["reblog"]["id"] if status["reblog"] else "null"),
+        status["url"].replace("'", r"\'") if status["url"] else "null",
+        status["sensitive"],
+        get_visibility(status["visibility"]),
+        status["spoiler_text"].replace("'", r"\'"),
+        True if status["in_reply_to_id"] else False,
+        (status["language"].replace("'", r"\'") if status["language"] else "null"),
+        "null",
+        "True",
+        status["account"]["id"],
+        "null",
+        (
+            status["in_reply_to_account_id"]
+            if status["in_reply_to_account_id"]
+            else "null"
+        ),
+        "null",
+        "null",
+        (
+            int(datetime.timestamp(status["edited_at"]))
+            if status["edited_at"]
+            else "null"
+        ),
+        "False",
+        str(media_attachment_ids),
+    )
+
+
+def get_media_attachment_ids(status):
+    media_attachment_ids = []
+    if status.media_attachments and len(status["media_attachments"]) > 0:
+        for attachment in status["media_attachments"]:
+            media_attachment_ids.append(attachment.id)
+    return media_attachment_ids
+
+
 def generate_statuses_sql(accounts_statuses):
     commands = []
     commands.append(
@@ -46,58 +95,19 @@ def generate_statuses_sql(accounts_statuses):
     )
     for account_statuses in accounts_statuses:
         for status in account_statuses:
-            media_attachment_ids = []
-            if status.media_attachments and len(status["media_attachments"]) > 0:
-                for attachment in status["media_attachments"]:
-                    media_attachment_ids.append(attachment.id)
-
-            commands.append(
-                "EXECUTE backfill_statuses ({}, '{}', '{}', {}, {}, '{}', {}, {}, '{}', {}, '{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {},{});\n".format(
-                    status["id"],
-                    status["uri"].replace("'", r"\'"),
-                    status["content"].replace("'", r"\'"),
-                    datetime.timestamp(status["created_at"]),
-                    (
-                        datetime.timestamp(status["edited_at"])
-                        if status["edited_at"]
-                        else datetime.timestamp(status["created_at"])
-                    ),
-                    (status["in_reply_to_id"] if status["in_reply_to_id"] else "null"),
-                    (status["reblog"]["id"] if status["reblog"] else "null"),
-                    status["url"].replace("'", r"\'") if status["url"] else "null",
-                    status["sensitive"],
-                    get_visibility(status["visibility"]),
-                    status["spoiler_text"].replace("'", r"\'"),
-                    True if status["in_reply_to_id"] else False,
-                    (
-                        status["language"].replace("'", r"\'")
-                        if status["language"]
-                        else "null"
-                    ),
-                    "null",
-                    "True",
-                    status["account"]["id"],
-                    "null",
-                    (
-                        status["in_reply_to_account_id"]
-                        if status["in_reply_to_account_id"]
-                        else "null"
-                    ),
-                    "null",
-                    "null",
-                    (
-                        datetime.timestamp(status["edited_at"])
-                        if status["edited_at"]
-                        else "null"
-                    ),
-                    "False",
-                    str(media_attachment_ids),
-                )
-            )
+            # if status["in_reply_to_id"]:
+            #     reply = mastodon.status(status["in_reply_to_id"])
+            #     commands.append(create_status(reply, get_media_attachment_ids(reply)))
+            media_attachment_ids = get_media_attachment_ids(status)
+            commands.append(create_status(status, media_attachment_ids))
 
     print("\n".join(media_attachment_ids))
     print(len(commands))
     print(commands)
+    return commands
+
+
+def write_commands(commands):
     with open("commands.sql", "w") as f:
         f.writelines(commands)
 
@@ -117,7 +127,8 @@ def main():
     statuses = get_user_statuses_from_remotes(
         accounts, source_instances, target_instance
     )
-    generate_statuses_sql(statuses)
+    commands = generate_statuses_sql(statuses)
+    write_commands(commands)
 
 
 if __name__ == "__main__":
