@@ -64,7 +64,7 @@ def get_user_statuses_from_remotes(accounts, source_instances, target_instance):
             account = mastodon.account_lookup(f"@{account}@{target_instance}")
             statuses = get_account_statuses(account, mastodon)
             for status in statuses:
-                statuses.append(get_all_replies(status, mastodon))
+                account_statuses.append(get_all_replies(status, mastodon))
 
             accounts_statuses.append(statuses)
     return accounts_statuses
