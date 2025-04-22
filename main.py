@@ -64,7 +64,7 @@ def get_user_statuses_from_remotes(accounts, source_instances, target_instance):
             statuses = get_account_statuses(account, mastodon)
             final_statuses = statuses.copy()
             for status in statuses:
-                final_statuses = final_statuses + get_all_replies(status, mastodon)
+                final_statuses += get_all_replies(status, mastodon)
 
             accounts_statuses.append(final_statuses)
     return accounts_statuses
@@ -143,25 +143,30 @@ def get_visibility(visibility_str):
     return mapping[visibility_str]
 
 
-def cleanup_statuses(statuses):
-    result = statuses.copy()
-    for status in statuses:
-        if not status:
-            result.remove(status)
-            continue
-        id_exists = False
-        for reference in statuses:
-            if (
-                "in_reply_to_id" in status
-                and status["in_reply_to_id"]
-                and reference
-                and "id" in reference
-                and reference["id"] == status["in_reply_to_id"]
-            ):
-                id_exists = True
-        if not id_exists:
-            result.remove(status)
-    return result
+def cleanup_statuses(accounts_statuses):
+    cleaned_accounts_statuses = []
+    for account in account_statuses:
+        result = statuses.copy()
+        for status in statuses:
+            if not status:
+                result.remove(status)
+                continue
+            id_exists = False
+            for reference in statuses:
+                print("Checking reference ")
+                if (
+                    "in_reply_to_id" in status
+                    and status["in_reply_to_id"]
+                    and reference
+                    and "id" in reference
+                    and reference["id"] == status["in_reply_to_id"]
+                ):
+                    id_exists = True
+                    print("Id exists in reply")
+            if not id_exists:
+                result.remove(status)
+        cleaned_accounts_statuses += result
+    return cleaned_accounts_statuses
 
 
 def main():
@@ -174,10 +179,8 @@ def main():
     statuses = get_user_statuses_from_remotes(
         accounts, source_instances, target_instance
     )
-    print(statuses)
+    print(len(statues))
     statuses = cleanup_statuses(statuses)
-    print("###########")
-    print(statuses)
     commands = generate_statuses_sql(statuses)
     print(commands)
     write_commands(commands)
