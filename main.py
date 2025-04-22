@@ -63,10 +63,11 @@ def get_user_statuses_from_remotes(accounts, source_instances, target_instance):
             print(f"Searching for posts for {account}@{source_instance}")
             account = mastodon.account_lookup(f"@{account}@{target_instance}")
             statuses = get_account_statuses(account, mastodon)
+            final_statuses = statuses.copy()
             for status in statuses:
-                account_statuses.append(get_all_replies(status, mastodon))
+                final_statuses.append(get_all_replies(status, mastodon))
 
-            accounts_statuses.append(statuses)
+            accounts_statuses.append(final_statuses)
     return accounts_statuses
 
 
@@ -129,7 +130,7 @@ def generate_statuses_sql(accounts_statuses):
             media_attachment_ids = get_media_attachment_ids(status)
             commands.append(create_status(status, media_attachment_ids))
 
-    print("\n".join(media_attachment_ids))
+            print("\n".join(media_attachment_ids))
     print(len(commands))
     print(commands)
     return commands
@@ -153,7 +154,11 @@ def cleanup_statuses(statuses):
             continue
         id_exists = False
         for reference in statuses:
-            if reference and reference["id"] == status["in_reply_to_id"]:
+            if (
+                reference
+                and "id" in reference
+                and reference["id"] == status["in_reply_to_id"]
+            ):
                 id_exists = True
         if not id_exists:
             result.remove(status)
@@ -172,6 +177,7 @@ def main():
     )
     statuses = cleanup_statuses(statuses)
     commands = generate_statuses_sql(statuses)
+    print(commands)
     write_commands(commands)
 
 
