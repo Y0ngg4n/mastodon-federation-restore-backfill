@@ -34,7 +34,6 @@ def login(source_instances):
 def get_all_replies(status, mastodon):
     replies = []
     while status and "in_reply_to_id" in status and status["in_reply_to_id"]:
-        print("Got reply")
         status = get_status(status["in_reply_to_id"], mastodon)
         if status and "in_reply_to_id" in status:
             replies.append(create_status(status, get_media_attachment_ids(status)))
@@ -65,7 +64,7 @@ def get_user_statuses_from_remotes(accounts, source_instances, target_instance):
             statuses = get_account_statuses(account, mastodon)
             final_statuses = statuses.copy()
             for status in statuses:
-                final_statuses.append(get_all_replies(status, mastodon))
+                final_statuses = final_statuses + get_all_replies(status, mastodon)
 
             accounts_statuses.append(final_statuses)
     return accounts_statuses
@@ -130,8 +129,6 @@ def generate_statuses_sql(accounts_statuses):
             media_attachment_ids = get_media_attachment_ids(status)
             commands.append(create_status(status, media_attachment_ids))
 
-            print("\n".join(media_attachment_ids))
-    print(len(commands))
     print(commands)
     return commands
 
@@ -155,7 +152,9 @@ def cleanup_statuses(statuses):
         id_exists = False
         for reference in statuses:
             if (
-                reference
+                "in_reply_to_id" in status
+                and status["in_reply_to_id"]
+                and reference
                 and "id" in reference
                 and reference["id"] == status["in_reply_to_id"]
             ):
@@ -175,7 +174,10 @@ def main():
     statuses = get_user_statuses_from_remotes(
         accounts, source_instances, target_instance
     )
+    print(statuses)
     statuses = cleanup_statuses(statuses)
+    print("###########")
+    print(statuses)
     commands = generate_statuses_sql(statuses)
     print(commands)
     write_commands(commands)
