@@ -113,21 +113,27 @@ def create_status(status, media_attachment_ids):
 
 def get_media_attachment_ids(status):
     media_attachment_ids = []
-    if status.media_attachments and len(status["media_attachments"]) > 0:
+    if (
+        "media_attachments" in status
+        and status["media_attachments"]
+        and len(status["media_attachments"]) > 0
+    ):
         for attachment in status["media_attachments"]:
             media_attachment_ids.append(attachment.id)
     return media_attachment_ids
 
 
-def generate_statuses_sql(accounts_statuses):
+def generate_statuses_sql(statuses):
     commands = []
     commands.append(
         "PREPARE backfill_statuses as INSERT INTO (id,uri,text,created_at,updated_at,in_reply_to_id,reblog_of_id,url,sensitive,visibility,spoiler_text,reply,language,conversation_id,local,account_id,application_id,in_reply_to_account_id,poll_id,deleted_at,edited_at,trendable,ordered_media_attachment_ids) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23) ON CONFLICT DO NOTHING;\n"
     )
-    for account_statuses in accounts_statuses:
-        for status in account_statuses:
-            media_attachment_ids = get_media_attachment_ids(status)
+    for status in statuses:
+        media_attachment_ids = get_media_attachment_ids(status)
+        try:
             commands.append(create_status(status, media_attachment_ids))
+        except:
+            print("Exception: " + status)
 
     print(commands)
     return commands
@@ -153,7 +159,6 @@ def cleanup_statuses(accounts_statuses):
                 continue
             id_exists = False
             for reference in account:
-                print("Checking reference ")
                 if (
                     "in_reply_to_id" in status
                     and status["in_reply_to_id"]
@@ -179,8 +184,8 @@ def main():
     statuses = get_user_statuses_from_remotes(
         accounts, source_instances, target_instance
     )
-    print(len(statuses))
     statuses = cleanup_statuses(statuses)
+    print(len(statuses))
     commands = generate_statuses_sql(statuses)
     print(commands)
     write_commands(commands)
