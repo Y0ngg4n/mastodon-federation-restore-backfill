@@ -51,17 +51,21 @@ def get_status(id, mastodon):
 @on_exception(expo, RateLimitException, max_tries=10)
 @limits(calls=300, period=FIVE_MINUTES)
 def get_account_statuses(account, mastodon):
-    return mastodon.account_statuses(account)
+    statuses = mastodon.account_statuses(account)
+    return mastodon.fetch_remaining(statuses)
 
 
 def get_user_statuses_from_remotes(accounts, source_instances, target_instance):
     accounts_statuses = []
     for source_instance in source_instances:
-        mastodon = Mastodon(access_token=f"{source_instance}_clientcred.secret")
+        mastodon = Mastodon(
+            access_token=f"{source_instance}_clientcred.secret", ratelimit_method="pace"
+        )
         for account in accounts:
             print(f"Searching for posts for {account}@{source_instance}")
             account = mastodon.account_lookup(f"@{account}@{target_instance}")
             statuses = get_account_statuses(account, mastodon)
+            print("Account-Statuses: " + str(len(statuses)))
             final_statuses = statuses.copy()
             for status in statuses:
                 final_statuses += get_all_replies(status, mastodon)
@@ -72,7 +76,7 @@ def get_user_statuses_from_remotes(accounts, source_instances, target_instance):
 
 def create_status(status, media_attachment_ids):
 
-    return "EXECUTE backfill_statuses ({}, '{}', '{}', {}, {}, {}, {}, '{}', {}, {}, '{}', {}, '{}', {}, {}, {}, {}, {}, {}, {}, {},{});\n".format(
+    return "EXECUTE backfill_statuses ({}, '{}', '{}', {}, {}, {}, {}, '{}', {}, {}, '{}', {}, '{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n".format(
         status["id"],
         status["uri"].replace("'", r"\'"),
         status["content"].replace("'", r"\'"),
@@ -107,7 +111,12 @@ def create_status(status, media_attachment_ids):
             else "null"
         ),
         "False",
-        str(media_attachment_ids),
+        # (
+        #     "{" + ",".join(media_attachment_ids)[:-1] + "}"
+        #     if len(media_attachment_ids) > 0
+        #     else "null"
+        # ),
+        "null",
     )
 
 
@@ -126,7 +135,7 @@ def get_media_attachment_ids(status):
 def generate_statuses_sql(statuses):
     commands = []
     commands.append(
-        "PREPARE backfill_statuses as INSERT INTO (id,uri,text,created_at,updated_at,in_reply_to_id,reblog_of_id,url,sensitive,visibility,spoiler_text,reply,language,conversation_id,local,account_id,application_id,in_reply_to_account_id,poll_id,deleted_at,edited_at,trendable,ordered_media_attachment_ids) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23) ON CONFLICT DO NOTHING;\n"
+        "PREPARE backfill_statuses as INSERT INTO statuses (id,uri,text,created_at,updated_at,in_reply_to_id,reblog_of_id,url,sensitive,visibility,spoiler_text,reply,language,conversation_id,local,account_id,application_id,in_reply_to_account_id,poll_id,deleted_at,edited_at,trendable,ordered_media_attachment_ids) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23) ON CONFLICT DO NOTHING;\n"
     )
     for status in statuses:
         media_attachment_ids = get_media_attachment_ids(status)
@@ -135,7 +144,6 @@ def generate_statuses_sql(statuses):
         except:
             print("Exception: " + status)
 
-    print(commands)
     return commands
 
 
@@ -170,6 +178,7 @@ def cleanup_statuses(accounts_statuses):
                     print("Id exists in reply")
             if not id_exists:
                 result.remove(status)
+                print("Id does not exist in reply")
         cleaned_accounts_statuses += result
     return cleaned_accounts_statuses
 
@@ -184,10 +193,10 @@ def main():
     statuses = get_user_statuses_from_remotes(
         accounts, source_instances, target_instance
     )
+    print(len(statuses))
     statuses = cleanup_statuses(statuses)
     print(len(statuses))
     commands = generate_statuses_sql(statuses)
-    print(commands)
     write_commands(commands)
 
 
