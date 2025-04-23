@@ -42,6 +42,25 @@ def get_all_replies(status, mastodon):
     return replies
 
 
+def get_all_reblogs(status, mastodon):
+    reblogs = []
+    while status and "in_reblog_to_id" in status and status["reblog_of_id"]:
+        status = get_status(status["in_reblog_to_id"], mastodon)
+        if status and "in_reblog_to_id" in status:
+            reblogs.append(create_status(status, get_media_attachment_ids(status)))
+        else:
+            break
+    return reblogs
+
+
+# def get_all_media(media_attachment_ids, mastodon):
+#     media = []
+#     for media_id in media_attachment_ids:
+#         mastodon.media(media_id)
+
+def get_missing_accounts(account_ids):
+    for()
+
 @on_exception(expo, RateLimitException, max_tries=10)
 @limits(calls=300, period=FIVE_MINUTES)
 def get_status(id, mastodon):
@@ -69,6 +88,7 @@ def get_user_statuses_from_remotes(accounts, source_instances, target_instance):
             final_statuses = statuses.copy()
             for status in statuses:
                 final_statuses += get_all_replies(status, mastodon)
+                final_statuses += get_all_reblogs(status, mastodon)
 
             accounts_statuses.append(final_statuses)
     return accounts_statuses
@@ -78,14 +98,18 @@ def create_status(status, media_attachment_ids):
 
     return "EXECUTE backfill_statuses ({}, '{}', '{}', {}, {}, {}, {}, '{}', {}, {}, '{}', {}, '{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n".format(
         status["id"],
-        status["uri"].replace("'", r"\'"),
-        status["content"].replace("'", r"\'"),
+        status["username"].replace("'", r"\'"),
+        status["domain"].replace("'", r"\'"),
+        "",
+        "",
         int(datetime.timestamp(status["created_at"])),
-        (
-            int(datetime.timestamp(status["edited_at"]))
-            if status["edited_at"]
-            else datetime.timestamp(status["created_at"])
-        ),
+        int(datetime.timestamp(status["created_at"])),
+        status["note"].replace("'", r"\'"),
+        status["display_name"].replace("'", r"\'"),
+        status["uri"].replace("'", r"\'"),
+        status["url"].replace("'", r"\'"),
+        status["avatar_file_name"].replace("'", r"\'"),
+        status["avatar_content_name"].replace("'", r"\'"),
         (status["in_reply_to_id"] if status["in_reply_to_id"] else "null"),
         (status["reblog"]["id"] if status["reblog"] else "null"),
         status["url"].replace("'", r"\'") if status["url"] else "null",
@@ -136,6 +160,9 @@ def generate_statuses_sql(statuses):
     commands = []
     commands.append(
         "PREPARE backfill_statuses as INSERT INTO statuses (id,uri,text,created_at,updated_at,in_reply_to_id,reblog_of_id,url,sensitive,visibility,spoiler_text,reply,language,conversation_id,local,account_id,application_id,in_reply_to_account_id,poll_id,deleted_at,edited_at,trendable,ordered_media_attachment_ids) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23) ON CONFLICT DO NOTHING;\n"
+    )
+    commands.append(
+        "PREPARE backfill_accounts as INSERT INTO accounts (id, username, \"domain\", private, public_key, created_at, updated_at, note text, display_name, uri varchar, url varchar, avatar_file_name, avatar_content_type, avatar_file_size, avatar_updated_at, header_file_name, header_content_type, header_file_size, header_updated_at, avatar_remote_url, \"locked\", header_remote_url, last_webfingered_at, inbox_url varchar, outbox_url varchar, shared_inbox_url, followers_url, protocol, memorial, moved_to_account_id, featured_collection_url, fields, actor_type, discoverable, also_known_as _varchar, silenced_at, suspended_at timestamp, hide_collections, avatar_storage_schema_version, header_storage_schema_version, sensitized_at, suspension_origin, trendable, reviewed_at, requested_review_at, indexable, attribution_domains) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37) ON CONFLICT DO NOTHING;\n"
     )
     for status in statuses:
         media_attachment_ids = get_media_attachment_ids(status)
