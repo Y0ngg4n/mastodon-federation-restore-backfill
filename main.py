@@ -145,14 +145,14 @@ def get_visibility(visibility_str):
 
 def cleanup_statuses(accounts_statuses):
     cleaned_accounts_statuses = []
-    for account in account_statuses:
-        result = statuses.copy()
-        for status in statuses:
+    for account in accounts_statuses:
+        result = account.copy()
+        for status in account:
             if not status:
                 result.remove(status)
                 continue
             id_exists = False
-            for reference in statuses:
+            for reference in account:
                 print("Checking reference ")
                 if (
                     "in_reply_to_id" in status
@@ -179,7 +179,7 @@ def main():
     statuses = get_user_statuses_from_remotes(
         accounts, source_instances, target_instance
     )
-    print(len(statues))
+    print(len(statuses))
     statuses = cleanup_statuses(statuses)
     commands = generate_statuses_sql(statuses)
     print(commands)
