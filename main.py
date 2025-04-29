@@ -59,18 +59,27 @@ def get_all_reblogs(status, mastodon):
 #     for media_id in media_attachment_ids:
 #         mastodon.media(media_id)
 
-def get_missing_accounts(account_ids, mastodon):
+
+def get_missing_accounts(status, mastodon):
+    print("Get missing accounts")
     accounts = []
-    for account_id in account_ids:
-        account = get_account()
+    if status and "account_id" in status:
+        account = get_account(status["account_id"])
         while account and "moved_to_account":
-            account = get_accounts(account["moved_to_account"]["id"], mastodon)
+            account = get_account(account["moved_to_account"]["id"], mastodon)
             if account and "moved_to_account" in status:
-                accounts.append(create_account(account))
+                accounts.append(account)
             else:
                 break
-
-
+    if status and "reply_to_account_id" in status:
+        account = get_account(status["reply_to_account_id"])
+        while account and "moved_to_account":
+            account = get_account(account["moved_to_account"]["id"], mastodon)
+            if account and "moved_to_account" in status:
+                accounts.append(account)
+            else:
+                break
+    return accounts
 
 
 @on_exception(expo, RateLimitException, max_tries=10)
@@ -85,14 +94,19 @@ def get_account_statuses(account, mastodon):
     statuses = mastodon.account_statuses(account)
     return mastodon.fetch_remaining(statuses)
 
+
 @on_exception(expo, RateLimitException, max_tries=10)
 @limits(calls=300, period=FIVE_MINUTES)
 def get_account(account_id, mastodon):
     return mastodon.account(account)
 
+
 def get_user_statuses_from_remotes(accounts, source_instances, target_instance):
+    print("Getting user statuses from remotes")
     accounts_statuses = []
+    missing_accounts = []
     for source_instance in source_instances:
+        print("Gettings users from " + source_instance)
         mastodon = Mastodon(
             access_token=f"{source_instance}_clientcred.secret", ratelimit_method="pace"
         )
@@ -105,9 +119,9 @@ def get_user_statuses_from_remotes(accounts, source_instances, target_instance):
             for status in statuses:
                 final_statuses += get_all_replies(status, mastodon)
                 final_statuses += get_all_reblogs(status, mastodon)
-
+                missing_accounts += get_missing_accounts(status, mastodon)
             accounts_statuses.append(final_statuses)
-    return accounts_statuses
+    return accounts_statuses, missing_accounts
 
 
 def create_status(status, media_attachment_ids):
@@ -156,6 +170,7 @@ def create_status(status, media_attachment_ids):
         "null",
     )
 
+
 def create_account(account):
 
     return "EXECUTE backfill_accounts ({}, '{}', '{}', {}, {}, {}, {}, '{}', {}, {}, '{}', {}, '{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {},{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n".format(
@@ -173,15 +188,12 @@ def create_account(account):
         # All the image functionality does not work so null here
         "null",
         "null",
-        "null"
+        "null" "null",
         "null",
         "null",
         "null",
-        "null",
-        "null"
-        "null",
-        "false"
-        "null",
+        "null" "null",
+        "false" "null",
         "null",
         account["uri"].replace("'", r"\'") + "/inbox",
         account["uri"].replace("'", r"\'") + "/outbox",
@@ -190,7 +202,7 @@ def create_account(account):
         (account["in_reply_to_id"] if account["in_reply_to_id"] else "null"),
         (account["reblog"]["id"] if account["reblog"] else "null"),
         account["url"].replace("'", r"\'") if account["url"] else "null",
-        "1"
+        "1",
         account["memorial"],
         (account["moved_to_account"]["id"] if account["moved_to_account"] else "null"),
         "null",
@@ -208,9 +220,9 @@ def create_account(account):
         "null",
         "null",
         "null",
-        "false"
-        "null"
+        "false" "null",
     )
+
 
 def get_media_attachment_ids(status):
     media_attachment_ids = []
@@ -229,15 +241,26 @@ def generate_statuses_sql(statuses):
     commands.append(
         "PREPARE backfill_statuses as INSERT INTO statuses (id,uri,text,created_at,updated_at,in_reply_to_id,reblog_of_id,url,sensitive,visibility,spoiler_text,reply,language,conversation_id,local,account_id,application_id,in_reply_to_account_id,poll_id,deleted_at,edited_at,trendable,ordered_media_attachment_ids) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23) ON CONFLICT DO NOTHING;\n"
     )
-    commands.append(
-        "PREPARE backfill_accounts as INSERT INTO accounts (id, username, \"domain\", private, public_key, created_at, updated_at, note text, display_name, uri varchar, url varchar, avatar_file_name, avatar_content_type, avatar_file_size, avatar_updated_at, header_file_name, header_content_type, header_file_size, header_updated_at, avatar_remote_url, \"locked\", header_remote_url, last_webfingered_at, inbox_url varchar, outbox_url varchar, shared_inbox_url, followers_url, protocol, memorial, moved_to_account_id, featured_collection_url, fields, actor_type, discoverable, also_known_as _varchar, silenced_at, suspended_at timestamp, hide_collections, avatar_storage_schema_version, header_storage_schema_version, sensitized_at, suspension_origin, trendable, reviewed_at, requested_review_at, indexable, attribution_domains) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37) ON CONFLICT DO NOTHING;\n"
-    )
     for status in statuses:
         media_attachment_ids = get_media_attachment_ids(status)
         try:
             commands.append(create_status(status, media_attachment_ids))
         except:
             print("Exception: " + status)
+
+    return commands
+
+
+def generate_accounts_sql(missing_accounts):
+    commands = []
+    commands.append(
+        'PREPARE backfill_accounts as INSERT INTO accounts (id, username, "domain", private, public_key, created_at, updated_at, note text, display_name, uri varchar, url varchar, avatar_file_name, avatar_content_type, avatar_file_size, avatar_updated_at, header_file_name, header_content_type, header_file_size, header_updated_at, avatar_remote_url, "locked", header_remote_url, last_webfingered_at, inbox_url varchar, outbox_url varchar, shared_inbox_url, followers_url, protocol, memorial, moved_to_account_id, featured_collection_url, fields, actor_type, discoverable, also_known_as, silenced_at, suspended_at timestamp, hide_collections, avatar_storage_schema_version, header_storage_schema_version, sensitized_at, suspension_origin, trendable, reviewed_at, requested_review_at, indexable, attribution_domains) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37) ON CONFLICT DO NOTHING;\n'
+    )
+    for account in missing_accounts:
+        try:
+            commands.append(create_account(account))
+        except:
+            print("Exception: " + account)
 
     return commands
 
@@ -285,13 +308,14 @@ def main():
 
     create_app(source_instances)
     login(source_instances)
-    statuses = get_user_statuses_from_remotes(
+    statuses, missing_accounts = get_user_statuses_from_remotes(
         accounts, source_instances, target_instance
     )
     print(len(statuses))
     statuses = cleanup_statuses(statuses)
     print(len(statuses))
     commands = generate_statuses_sql(statuses)
+    commands += generate_accounts_sql(missing_accounts)
     write_commands(commands)
 
 
