@@ -1,4 +1,5 @@
 import requests as http
+import json
 import urllib
 from mastodon import Mastodon
 from datetime import datetime
@@ -58,8 +59,19 @@ def get_all_reblogs(status, mastodon):
 #     for media_id in media_attachment_ids:
 #         mastodon.media(media_id)
 
-def get_missing_accounts(account_ids):
-    for()
+def get_missing_accounts(account_ids, mastodon):
+    accounts = []
+    for account_id in account_ids:
+        account = get_account()
+        while account and "moved_to_account":
+            account = get_accounts(account["moved_to_account"]["id"], mastodon)
+            if account and "moved_to_account" in status:
+                accounts.append(create_account(account))
+            else:
+                break
+
+
+
 
 @on_exception(expo, RateLimitException, max_tries=10)
 @limits(calls=300, period=FIVE_MINUTES)
@@ -73,6 +85,10 @@ def get_account_statuses(account, mastodon):
     statuses = mastodon.account_statuses(account)
     return mastodon.fetch_remaining(statuses)
 
+@on_exception(expo, RateLimitException, max_tries=10)
+@limits(calls=300, period=FIVE_MINUTES)
+def get_account(account_id, mastodon):
+    return mastodon.account(account)
 
 def get_user_statuses_from_remotes(accounts, source_instances, target_instance):
     accounts_statuses = []
@@ -98,18 +114,14 @@ def create_status(status, media_attachment_ids):
 
     return "EXECUTE backfill_statuses ({}, '{}', '{}', {}, {}, {}, {}, '{}', {}, {}, '{}', {}, '{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n".format(
         status["id"],
-        status["username"].replace("'", r"\'"),
-        status["domain"].replace("'", r"\'"),
-        "",
-        "",
-        int(datetime.timestamp(status["created_at"])),
-        int(datetime.timestamp(status["created_at"])),
-        status["note"].replace("'", r"\'"),
-        status["display_name"].replace("'", r"\'"),
         status["uri"].replace("'", r"\'"),
-        status["url"].replace("'", r"\'"),
-        status["avatar_file_name"].replace("'", r"\'"),
-        status["avatar_content_name"].replace("'", r"\'"),
+        status["content"].replace("'", r"\'"),
+        int(datetime.timestamp(status["created_at"])),
+        (
+            int(datetime.timestamp(status["edited_at"]))
+            if status["edited_at"]
+            else datetime.timestamp(status["created_at"])
+        ),
         (status["in_reply_to_id"] if status["in_reply_to_id"] else "null"),
         (status["reblog"]["id"] if status["reblog"] else "null"),
         status["url"].replace("'", r"\'") if status["url"] else "null",
@@ -135,6 +147,7 @@ def create_status(status, media_attachment_ids):
             else "null"
         ),
         "False",
+        # Media handling currently not working
         # (
         #     "{" + ",".join(media_attachment_ids)[:-1] + "}"
         #     if len(media_attachment_ids) > 0
@@ -143,6 +156,61 @@ def create_status(status, media_attachment_ids):
         "null",
     )
 
+def create_account(account):
+
+    return "EXECUTE backfill_accounts ({}, '{}', '{}', {}, {}, {}, {}, '{}', {}, {}, '{}', {}, '{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {},{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n".format(
+        account["id"],
+        account["username"].replace("'", r"\'"),
+        account["domain"].replace("'", r"\'"),
+        "",
+        "",
+        int(datetime.timestamp(account["created_at"])),
+        int(datetime.timestamp(account["created_at"])),
+        account["note"].replace("'", r"\'"),
+        account["display_name"].replace("'", r"\'"),
+        account["uri"].replace("'", r"\'"),
+        account["url"].replace("'", r"\'"),
+        # All the image functionality does not work so null here
+        "null",
+        "null",
+        "null"
+        "null",
+        "null",
+        "null",
+        "null",
+        "null"
+        "null",
+        "false"
+        "null",
+        "null",
+        account["uri"].replace("'", r"\'") + "/inbox",
+        account["uri"].replace("'", r"\'") + "/outbox",
+        "https://" + account["domain"].replace("'", r"\'") + "/inbox",
+        account["uri"].replace("'", r"\'") + "/followers",
+        (account["in_reply_to_id"] if account["in_reply_to_id"] else "null"),
+        (account["reblog"]["id"] if account["reblog"] else "null"),
+        account["url"].replace("'", r"\'") if account["url"] else "null",
+        "1"
+        account["memorial"],
+        (account["moved_to_account"]["id"] if account["moved_to_account"] else "null"),
+        "null",
+        json.dumps(account["fields"]),
+        "null",
+        account["discoverable"],
+        "null",
+        "null",
+        "null",
+        "null",
+        "null",
+        "null",
+        "null",
+        "null",
+        "null",
+        "null",
+        "null",
+        "false"
+        "null"
+    )
 
 def get_media_attachment_ids(status):
     media_attachment_ids = []
