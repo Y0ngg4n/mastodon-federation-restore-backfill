@@ -61,10 +61,12 @@ def get_all_reblogs(status, mastodon):
 
 
 def get_missing_accounts(status, mastodon):
-    print("Get missing accounts")
+    # print("Get missing accounts")
     accounts = []
     if status and "account_id" in status:
         account = get_account(status["account_id"])
+        accounts.append(account)
+        print("Appended account")
         while account and "moved_to_account":
             account = get_account(account["moved_to_account"]["id"], mastodon)
             if account and "moved_to_account" in status:
@@ -73,6 +75,8 @@ def get_missing_accounts(status, mastodon):
                 break
     if status and "reply_to_account_id" in status:
         account = get_account(status["reply_to_account_id"])
+        accounts.append(account)
+        print("Appended account")
         while account and "moved_to_account":
             account = get_account(account["moved_to_account"]["id"], mastodon)
             if account and "moved_to_account" in status:
@@ -256,6 +260,7 @@ def generate_accounts_sql(missing_accounts):
     commands.append(
         'PREPARE backfill_accounts as INSERT INTO accounts (id, username, "domain", private, public_key, created_at, updated_at, note text, display_name, uri varchar, url varchar, avatar_file_name, avatar_content_type, avatar_file_size, avatar_updated_at, header_file_name, header_content_type, header_file_size, header_updated_at, avatar_remote_url, "locked", header_remote_url, last_webfingered_at, inbox_url varchar, outbox_url varchar, shared_inbox_url, followers_url, protocol, memorial, moved_to_account_id, featured_collection_url, fields, actor_type, discoverable, also_known_as, silenced_at, suspended_at timestamp, hide_collections, avatar_storage_schema_version, header_storage_schema_version, sensitized_at, suspension_origin, trendable, reviewed_at, requested_review_at, indexable, attribution_domains) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37) ON CONFLICT DO NOTHING;\n'
     )
+    print("Length of missing accounts: " + str(len(missing_accounts)))
     for account in missing_accounts:
         try:
             commands.append(create_account(account))
