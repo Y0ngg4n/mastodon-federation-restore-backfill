@@ -63,18 +63,23 @@ def get_all_reblogs(status, mastodon):
 def get_missing_accounts(status, mastodon):
     # print("Get missing accounts")
     accounts = []
-    if status and "account_id" in status:
-        account = get_account(status["account_id"])
+    if status and "account" in status and "id" in status["account"]:
+        account = get_account(status["account"]["id"], mastodon)
         accounts.append(account)
         print("Appended account")
-        while account and "moved_to_account":
+        while (
+            account
+            and "moved_to_account" in account
+            and account["moved_to_account"]
+            and "id" in account["moved_to_account"]
+        ):
             account = get_account(account["moved_to_account"]["id"], mastodon)
             if account and "moved_to_account" in status:
                 accounts.append(account)
             else:
                 break
     if status and "reply_to_account_id" in status:
-        account = get_account(status["reply_to_account_id"])
+        account = get_account(status["reply_to_account_id"], mastodon)
         accounts.append(account)
         print("Appended account")
         while account and "moved_to_account":
@@ -83,6 +88,7 @@ def get_missing_accounts(status, mastodon):
                 accounts.append(account)
             else:
                 break
+    print("Length of missing accounts" + str(len(accounts)))
     return accounts
 
 
@@ -102,7 +108,7 @@ def get_account_statuses(account, mastodon):
 @on_exception(expo, RateLimitException, max_tries=10)
 @limits(calls=300, period=FIVE_MINUTES)
 def get_account(account_id, mastodon):
-    return mastodon.account(account)
+    return mastodon.account(account_id)
 
 
 def get_user_statuses_from_remotes(accounts, source_instances, target_instance):
@@ -130,15 +136,15 @@ def get_user_statuses_from_remotes(accounts, source_instances, target_instance):
 
 def create_status(status, media_attachment_ids):
 
-    return "EXECUTE backfill_statuses ({}, '{}', '{}', {}, {}, {}, {}, '{}', {}, {}, '{}', {}, '{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n".format(
+    return "EXECUTE backfill_statuses ({}, E'{}', E'{}', {}, {}, {}, {}, E'{}', {}, {}, E'{}', {}, E'{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n".format(
         status["id"],
         status["uri"].replace("'", r"\'"),
         status["content"].replace("'", r"\'"),
-        int(datetime.timestamp(status["created_at"])),
+        status["created_at"].isoformat(),
         (
-            int(datetime.timestamp(status["edited_at"]))
+            status["edited_at"].isoformat()
             if status["edited_at"]
-            else datetime.timestamp(status["created_at"])
+            else status["created_at"].isoformat()
         ),
         (status["in_reply_to_id"] if status["in_reply_to_id"] else "null"),
         (status["reblog"]["id"] if status["reblog"] else "null"),
@@ -159,11 +165,7 @@ def create_status(status, media_attachment_ids):
         ),
         "null",
         "null",
-        (
-            int(datetime.timestamp(status["edited_at"]))
-            if status["edited_at"]
-            else "null"
-        ),
+        (status["edited_at"].isoformat() if status["edited_at"] else "null"),
         "False",
         # Media handling currently not working
         # (
@@ -177,14 +179,14 @@ def create_status(status, media_attachment_ids):
 
 def create_account(account):
 
-    return "EXECUTE backfill_accounts ({}, '{}', '{}', {}, {}, {}, {}, '{}', {}, {}, '{}', {}, '{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {},{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n".format(
+    return "EXECUTE backfill_accounts ({}, E'{}', E'{}', {}, {}, {}, {}, E'{}', E'{}', E'{}', E'{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, E'{}', {}, E'{}',E'{}', E'{}', E'{}', {}, {}, {}, {}, E'{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n".format(
         account["id"],
         account["username"].replace("'", r"\'"),
-        account["domain"].replace("'", r"\'"),
-        "",
-        "",
-        int(datetime.timestamp(account["created_at"])),
-        int(datetime.timestamp(account["created_at"])),
+        account["acct"].split("@")[1].replace("'", r"\'"),
+        "null",
+        "null",
+        account["created_at"].isoformat(),
+        account["created_at"].isoformat(),
         account["note"].replace("'", r"\'"),
         account["display_name"].replace("'", r"\'"),
         account["uri"].replace("'", r"\'"),
@@ -192,22 +194,22 @@ def create_account(account):
         # All the image functionality does not work so null here
         "null",
         "null",
-        "null" "null",
         "null",
         "null",
         "null",
-        "null" "null",
-        "false" "null",
+        "null",
+        "null",
+        "null",
+        "null",
+        account["locked"],
+        "",
         "null",
         account["uri"].replace("'", r"\'") + "/inbox",
         account["uri"].replace("'", r"\'") + "/outbox",
-        "https://" + account["domain"].replace("'", r"\'") + "/inbox",
+        "https://" + account["acct"].split("@")[1].replace("'", r"\'") + "/inbox",
         account["uri"].replace("'", r"\'") + "/followers",
-        (account["in_reply_to_id"] if account["in_reply_to_id"] else "null"),
-        (account["reblog"]["id"] if account["reblog"] else "null"),
-        account["url"].replace("'", r"\'") if account["url"] else "null",
         "1",
-        account["memorial"],
+        account["memorial"] if account["memorial"] else "null",
         (account["moved_to_account"]["id"] if account["moved_to_account"] else "null"),
         "null",
         json.dumps(account["fields"]),
@@ -224,7 +226,8 @@ def create_account(account):
         "null",
         "null",
         "null",
-        "false" "null",
+        "false",
+        "null",
     )
 
 
@@ -258,14 +261,16 @@ def generate_statuses_sql(statuses):
 def generate_accounts_sql(missing_accounts):
     commands = []
     commands.append(
-        'PREPARE backfill_accounts as INSERT INTO accounts (id, username, "domain", private, public_key, created_at, updated_at, note text, display_name, uri varchar, url varchar, avatar_file_name, avatar_content_type, avatar_file_size, avatar_updated_at, header_file_name, header_content_type, header_file_size, header_updated_at, avatar_remote_url, "locked", header_remote_url, last_webfingered_at, inbox_url varchar, outbox_url varchar, shared_inbox_url, followers_url, protocol, memorial, moved_to_account_id, featured_collection_url, fields, actor_type, discoverable, also_known_as, silenced_at, suspended_at timestamp, hide_collections, avatar_storage_schema_version, header_storage_schema_version, sensitized_at, suspension_origin, trendable, reviewed_at, requested_review_at, indexable, attribution_domains) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37) ON CONFLICT DO NOTHING;\n'
+        'PREPARE backfill_accounts as INSERT INTO accounts (id, username, "domain", private, public_key, created_at, updated_at, note, display_name, uri, url, avatar_file_name, avatar_content_type, avatar_file_size, avatar_updated_at, header_file_name, header_content_type, header_file_size, header_updated_at, avatar_remote_url, "locked", header_remote_url, last_webfingered_at, inbox_url varchar, outbox_url varchar, shared_inbox_url, followers_url, protocol, memorial, moved_to_account_id, featured_collection_url, fields, actor_type, discoverable, also_known_as, silenced_at, suspended_at timestamp, hide_collections, avatar_storage_schema_version, header_storage_schema_version, sensitized_at, suspension_origin, trendable, reviewed_at, requested_review_at, indexable, attribution_domains) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47) ON CONFLICT DO NOTHING;\n'
     )
     print("Length of missing accounts: " + str(len(missing_accounts)))
     for account in missing_accounts:
         try:
             commands.append(create_account(account))
-        except:
-            print("Exception: " + account)
+        except Exception as e:
+            print("Exception: " + str(account))
+            print("Exception: " + str(e))
+            print("###########")
 
     return commands
 
