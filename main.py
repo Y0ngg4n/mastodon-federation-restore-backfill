@@ -136,7 +136,7 @@ def get_user_statuses_from_remotes(accounts, source_instances, target_instance):
 
 def create_status(status, media_attachment_ids):
 
-    return "EXECUTE backfill_statuses ({}, E'{}', E'{}', {}, {}, {}, {}, E'{}', {}, {}, E'{}', {}, E'{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n".format(
+    return "EXECUTE backfill_statuses ({}, E'{}', E'{}', '{}', '{}', {}, {}, E'{}', {}, {}, E'{}', {}, E'{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n".format(
         status["id"],
         status["uri"].replace("'", r"\'"),
         status["content"].replace("'", r"\'"),
@@ -165,7 +165,11 @@ def create_status(status, media_attachment_ids):
         ),
         "null",
         "null",
-        (status["edited_at"].isoformat() if status["edited_at"] else "null"),
+        (
+            "'" + status["edited_at"].isoformat() + "'"
+            if status["edited_at"]
+            else "null"
+        ),
         "False",
         # Media handling currently not working
         # (
@@ -179,7 +183,7 @@ def create_status(status, media_attachment_ids):
 
 def create_account(account):
 
-    return "EXECUTE backfill_accounts ({}, E'{}', E'{}', {}, {}, {}, {}, E'{}', E'{}', E'{}', E'{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, E'{}', {}, E'{}',E'{}', E'{}', E'{}', {}, {}, {}, {}, E'{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n".format(
+    return "EXECUTE backfill_accounts ({}, E'{}', E'{}', {}, {}, '{}', '{}', E'{}', E'{}', E'{}', E'{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, E'{}', {}, E'{}',E'{}', E'{}', E'{}', {}, {}, {}, {}, E'{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n".format(
         account["id"],
         account["username"].replace("'", r"\'"),
         account["acct"].split("@")[1].replace("'", r"\'"),
