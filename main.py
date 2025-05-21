@@ -37,22 +37,30 @@ def get_all_replies(status, mastodon):
     replies = []
     while status and "in_reply_to_id" in status and status["in_reply_to_id"]:
         status = get_status(status["in_reply_to_id"], mastodon)
-        if status and "in_reply_to_id" in status:
-            replies.append(create_status(status, get_media_attachment_ids(status)))
+        if status:
+            replies.append(status)
+            if "in_reply_to_id" in status and status["in_reply_to_id"]:
+                status = get_status(status["in_reply_to_id"], mastodon)
+            else:
+                break
         else:
             break
-    return replies
+    return reversed(replies)
 
 
 def get_all_reblogs(status, mastodon):
     reblogs = []
     while status and "in_reblog_to_id" in status and status["reblog_of_id"]:
         status = get_status(status["in_reblog_to_id"], mastodon)
-        if status and "in_reblog_to_id" in status:
-            reblogs.append(create_status(status, get_media_attachment_ids(status)))
+        if status:
+            reblogs.append(status)
+            if "in_reblog_to_id" in status and status["in_reblog_to_id"]:
+                status = get_status(status["in_reblog_to_id"], mastodon)
+            else:
+                break
         else:
             break
-    return reblogs
+    return reversed(reblogs)
 
 
 # def get_all_media(media_attachment_ids, mastodon):
@@ -126,11 +134,12 @@ def get_user_statuses_from_remotes(accounts, source_instances, target_instance):
             account = mastodon.account_lookup(f"@{account}@{target_instance}")
             statuses = get_account_statuses(account, mastodon)
             print("Account-Statuses: " + str(len(statuses)))
-            final_statuses = statuses.copy()
+            final_statuses = []
             for status in tqdm(statuses):
                 final_statuses += get_all_replies(status, mastodon)
                 final_statuses += get_all_reblogs(status, mastodon)
                 missing_accounts += get_missing_accounts(status, mastodon)
+            final_statuses += statuses
             accounts_statuses.append(final_statuses)
     return accounts_statuses, missing_accounts
 
@@ -258,7 +267,7 @@ def generate_statuses_sql(statuses):
         try:
             commands.append(create_status(status, media_attachment_ids))
         except:
-            print("Exception: " + status)
+            print("Exception: " + str(status))
 
     return commands
 
@@ -294,24 +303,24 @@ def cleanup_statuses(accounts_statuses):
     cleaned_accounts_statuses = []
     for account in accounts_statuses:
         result = account.copy()
-        for status in tqdm(account):
-            if not status:
-                result.remove(status)
-                continue
-            id_exists = False
-            for reference in account:
-                if (
-                    "in_reply_to_id" in status
-                    and status["in_reply_to_id"]
-                    and reference
-                    and "id" in reference
-                    and reference["id"] == status["in_reply_to_id"]
-                ):
-                    id_exists = True
-                    # print("Id exists in reply")
-            if not id_exists:
-                result.remove(status)
-                # print("Id does not exist in reply")
+        # for status in tqdm(account):
+        #     if not status:
+        #         result.remove(status)
+        #         continue
+        #     id_exists = False
+        #     for reference in account:
+        #         if (
+        #             "in_reply_to_id" in status
+        #             and status["in_reply_to_id"]
+        #             and reference
+        #             and "id" in reference
+        #             and reference["id"] == status["in_reply_to_id"]
+        #         ):
+        #             id_exists = True
+        #             # print("Id exists in reply")
+        #     if not id_exists:
+        #         result.remove(status)
+        #         # print("Id does not exist in reply")
         cleaned_accounts_statuses += result
     return cleaned_accounts_statuses
 
